@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Paper.io Hack - ESP, Visão Ampliada, Speed e Imortalidade
 // @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  ESP para identificar bots vs players, campo de visão ampliada, velocidade aumentada e imortalidade
+// @version      2.4
+// @description  ESP para identificar bots vs players, campo de visão ampliada, velocidade aumentada, imortalidade e avatar personalizado funcional
 // @author       You
 // @match        https://paper2.io/*
 // @match        https://paperio.site/*
@@ -19,7 +19,7 @@
         enhancedVision: true,       // Visão ampliada
         speedHack: true,            // Velocidade aumentada
         immortality: true,          // Imortalidade
-        speedMultiplier: 2,       // Multiplicador de velocidade (1.0 = normal)
+        speedMultiplier: 1.5,       // Multiplicador de velocidade (1.0 = normal)
         visionMultiplier: 4.0,      // Multiplicador de visão (maior = mais distante)
         showNames: true,            // Mostrar nomes
         showDistance: true,         // Mostrar distância
@@ -34,6 +34,8 @@
     let espCanvas = null;
     let espCtx = null;
     let playerListDiv = null;
+    let customAvatarUrl = null;     // URL da imagem personalizada
+    let customAvatarImage = null;   // Imagem carregada
     let originalUnitSpeed = null;
     let originalMinScale = null;
     let originalMaxScale = null;
@@ -41,12 +43,14 @@
     let originalGetRenderContext = null;
     let originalGetMovement = null;
     let originalKill = null;
+    let originalRenderAvatars = null; // Função original de renderização de avatares
     let controlBtn = null;
     let hacksActive = false;        // Estado dos hacks
     let espLoopInterval = null;
     let playerListInterval = null;
     let cameraUpdateInterval = null;
     let immortalityInterval = null;
+    let avatarRenderInterval = null;
 
     // Aguarda o jogo carregar
     function waitForGame() {
@@ -91,6 +95,11 @@
         // Aplica imortalidade
         if (CONFIG.immortality) {
             applyImmortality();
+        }
+
+        // Carrega avatar personalizado se URL existir
+        if (customAvatarUrl) {
+            loadCustomAvatar(customAvatarUrl);
         }
 
         // Cria e inicializa o ESP
@@ -229,6 +238,164 @@
         }, 100);
 
         console.log('[PAPER.IO HACK] Imortalidade ativada!');
+    }
+
+    // Carrega avatar personalizado via URL - CORRIGIDO PARA FUNCIONAR COM QUALQUER URL
+    function loadCustomAvatar(url) {
+        if (!url || url.trim() === '') {
+            console.log('[PAPER.IO HACK] URL vazia, avatar personalizado removido');
+            customAvatarUrl = null;
+            customAvatarImage = null;
+            if (avatarRenderInterval) {
+                clearInterval(avatarRenderInterval);
+                avatarRenderInterval = null;
+            }
+            return;
+        }
+
+        customAvatarUrl = url.trim();
+        const img = new Image();
+
+        // NÃO usa crossOrigin para evitar problemas com CORS
+        // img.crossOrigin = "Anonymous";
+
+        img.onload = () => {
+            customAvatarImage = img;
+            console.log('[PAPER.IO HACK] Avatar personalizado carregado com sucesso!');
+
+            // Inicia a renderização do avatar
+            if (!avatarRenderInterval) {
+                startAvatarRendering();
+            }
+
+            // Mostra notificação
+            showNotification('✅ Avatar personalizado aplicado!', '#00ff00');
+        };
+
+        img.onerror = (e) => {
+            console.error('[PAPER.IO HACK] Erro ao carregar imagem do avatar:', e);
+            customAvatarImage = null;
+            customAvatarUrl = null;
+            showNotification('❌ Erro ao carregar avatar! Tente outra URL.', '#ff0000');
+            if (avatarRenderInterval) {
+                clearInterval(avatarRenderInterval);
+                avatarRenderInterval = null;
+            }
+        };
+
+        img.src = customAvatarUrl;
+    }
+
+    // Inicia a renderização do avatar personalizado
+    function startAvatarRendering() {
+        if (avatarRenderInterval) {
+            clearInterval(avatarRenderInterval);
+        }
+
+        avatarRenderInterval = setInterval(() => {
+            if (customAvatarImage && gameInstance && gameInstance.player && !gameInstance.player.death && espCtx) {
+                const renderCtx = gameInstance.getRenderContext();
+                if (renderCtx) {
+                    drawCustomAvatar(renderCtx.ctx, gameInstance.player, renderCtx.scale, renderCtx.scaler);
+                }
+            }
+        }, CONFIG.updateInterval);
+    }
+
+    // Desenha o avatar personalizado na posição do jogador
+    function drawCustomAvatar(ctx, player, scale, scaler) {
+        if (!customAvatarImage || !player.position) return;
+
+        const { x, y } = player.position;
+        const devicePixelRatio = window.devicePixelRatio || 1;
+        const avatarSize = 40 * scale / devicePixelRatio; // Tamanho proporcional
+
+        // Salva estado do contexto
+        ctx.save();
+
+        // Posiciona no centro do jogador
+        ctx.translate(
+            x * scale + espCanvas.width / 2,
+            y * scale + espCanvas.height / 2
+        );
+
+        // Escala para o tamanho desejado
+        ctx.scale(avatarSize / customAvatarImage.width, avatarSize / customAvatarImage.height);
+
+        // Desenha a imagem centralizada
+        ctx.drawImage(
+            customAvatarImage,
+            -customAvatarImage.width / 2,
+            -customAvatarImage.height / 2
+        );
+
+        // Restaura estado
+        ctx.restore();
+    }
+
+    // Mostra notificação na tela
+    function showNotification(message, color = '#00ffff') {
+        // Remove notificações antigas
+        document.querySelectorAll('.hack-notification').forEach(el => el.remove());
+
+        const notification = document.createElement('div');
+        notification.className = 'hack-notification';
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85);
+            color: ${color};
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-family: 'Arial', sans-serif;
+            font-size: 16px;
+            font-weight: bold;
+            text-align: center;
+            box-shadow: 0 4px 20px ${color}66;
+            z-index: 99999;
+            animation: slideDown 3s ease-out forwards;
+            border: 2px solid ${color};
+            pointer-events: none;
+        `;
+
+        notification.textContent = message;
+        document.body.appendChild(notification);
+
+        // Remove após animação
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 3000);
+
+        // Adiciona animação CSS se não existir
+        if (!document.getElementById('hack-notification-styles')) {
+            const style = document.createElement('style');
+            style.id = 'hack-notification-styles';
+            style.textContent = `
+                @keyframes slideDown {
+                    0% {
+                        opacity: 0;
+                        transform: translateX(-50%) translateY(-20px);
+                    }
+                    10% {
+                        opacity: 1;
+                        transform: translateX(-50%) translateY(0);
+                    }
+                    90% {
+                        opacity: 1;
+                        transform: translateX(-50%) translateY(0);
+                    }
+                    100% {
+                        opacity: 0;
+                        transform: translateX(-50%) translateY(-20px);
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+        }
     }
 
     // Cria o overlay para ESP
@@ -403,6 +570,12 @@
                     infoY += 20;
                 }
 
+                // Avatar personalizado
+                if (customAvatarImage) {
+                    espCtx.fillText(`🎨 Avatar Custom`, padding, infoY);
+                    infoY += 20;
+                }
+
                 // Território
                 espCtx.fillText(`📊 Território: ${(gameInstance.player.percent * 100).toFixed(2)}%`, padding, infoY);
                 infoY += 20;
@@ -500,6 +673,13 @@
             if (originalKill) {
                 gameInstance.kill = originalKill;
             }
+            if (originalRenderAvatars) {
+                const proto = Object.getPrototypeOf(gameInstance);
+                const key = Object.getOwnPropertyNames(proto).find(k => proto[k] === gameInstance.renderAvatars);
+                if (key) {
+                    proto[key] = originalRenderAvatars;
+                }
+            }
         }
 
         // Limpa intervalos
@@ -519,6 +699,10 @@
             clearInterval(immortalityInterval);
             immortalityInterval = null;
         }
+        if (avatarRenderInterval) {
+            clearInterval(avatarRenderInterval);
+            avatarRenderInterval = null;
+        }
 
         // Remove elementos
         if (espCanvas && espCanvas.parentNode) {
@@ -529,6 +713,9 @@
             playerListDiv.parentNode.removeChild(playerListDiv);
             playerListDiv = null;
         }
+
+        // Remove notificações
+        document.querySelectorAll('.hack-notification').forEach(el => el.remove());
 
         console.log('[PAPER.IO HACK] Hacks removidos');
     }
@@ -589,6 +776,132 @@
         updateButtonState();
     }
 
+    // Mata todos os jogadores exceto o próprio
+    function killAllPlayers() {
+        if (!gameInstance || !gameInstance.units) {
+            console.log('[PAPER.IO HACK] Kill All: Jogo não carregado');
+            return;
+        }
+
+        let killedCount = 0;
+        let botCount = 0;
+        let playerCount = 0;
+
+        // Itera sobre todos os jogadores
+        gameInstance.units.forEach(unit => {
+            // Pula se for o próprio jogador
+            if (unit === gameInstance.player) return;
+
+            // Pula se já estiver morto
+            if (unit.death) return;
+
+            // Mata o jogador/bot
+            try {
+                // Determina se é bot ou player
+                const isBot = unit.constructor.name === '_0x29a0a0' || unit.type !== undefined;
+
+                // Chama a função kill original
+                if (originalKill) {
+                    originalKill.call(gameInstance, unit, gameInstance.player, 'eliminated');
+                } else {
+                    // Fallback: força a morte
+                    unit.death = true;
+                    unit.dead = true;
+                }
+
+                killedCount++;
+                if (isBot) {
+                    botCount++;
+                } else {
+                    playerCount++;
+                }
+
+                console.log(`[PAPER.IO HACK] Kill All: ${isBot ? 'Bot' : 'Player'} "${unit.name || 'Anônimo'}" eliminado`);
+            } catch (error) {
+                console.error('[PAPER.IO HACK] Erro ao matar unidade:', error);
+            }
+        });
+
+        console.log(`[PAPER.IO HACK] Kill All: ${killedCount} jogadores eliminados (${playerCount} players, ${botCount} bots)`);
+
+        // Mostra notificação visual
+        showKillNotification(killedCount, playerCount, botCount);
+    }
+
+    // Mostra notificação visual ao matar todos
+    function showKillNotification(total, players, bots) {
+        // Remove notificações antigas
+        document.querySelectorAll('.kill-notification').forEach(el => el.remove());
+
+        // Cria div de notificação
+        const notification = document.createElement('div');
+        notification.className = 'kill-notification';
+        notification.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%);
+            color: white;
+            padding: 20px 40px;
+            border-radius: 15px;
+            font-family: 'Arial', sans-serif;
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            box-shadow: 0 10px 40px rgba(255, 0, 0, 0.6);
+            z-index: 99999;
+            animation: notificationAnim 3s ease-out forwards;
+            border: 3px solid white;
+            pointer-events: none;
+        `;
+
+        notification.innerHTML = `
+            <div style="font-size: 48px; margin-bottom: 10px;">💀</div>
+            <div style="font-size: 28px; margin-bottom: 10px;">KILL ALL ATIVADO!</div>
+            <div style="font-size: 20px; margin-top: 10px;">
+                ${total} inimigos eliminados<br>
+                <span style="font-size: 16px; color: #ffcc00;">(${players} players, ${bots} bots)</span>
+            </div>
+        `;
+
+        document.body.appendChild(notification);
+
+        // Remove após animação
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 3000);
+
+        // Adiciona animação CSS se não existir
+        if (!document.getElementById('kill-notification-styles')) {
+            const style = document.createElement('style');
+            style.id = 'kill-notification-styles';
+            style.textContent = `
+                @keyframes notificationAnim {
+                    0% {
+                        opacity: 0;
+                        transform: translate(-50%, -50%) scale(0.8);
+                    }
+                    10% {
+                        opacity: 1;
+                        transform: translate(-50%, -50%) scale(1.1);
+                    }
+                    90% {
+                        opacity: 1;
+                        transform: translate(-50%, -50%) scale(1);
+                    }
+                    100% {
+                        opacity: 0;
+                        transform: translate(-50%, -50%) scale(1.2);
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+    }
+
     // Inicia tudo
     console.log('[PAPER.IO HACK] Script carregado');
     addControlButton();
@@ -598,6 +911,40 @@
     document.addEventListener('keydown', (e) => {
         if (e.key === 'F1' || e.keyCode === 112) {
             toggleHacks();
+            e.preventDefault();
+        }
+    });
+
+    // Adiciona atalho de teclado (F2 para matar todos)
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'F2' || e.keyCode === 113) {
+            if (hacksActive && gameInstance) {
+                console.log('[PAPER.IO HACK] F2 pressionado - Iniciando Kill All...');
+                killAllPlayers();
+            } else {
+                console.log('[PAPER.IO HACK] F2 pressionado - Hacks não ativados ou jogo não carregado');
+            }
+            e.preventDefault();
+        }
+    });
+
+    // Adiciona atalho de teclado (F3 para avatar personalizado)
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'F3' || e.keyCode === 114) {
+            if (hacksActive) {
+                const url = prompt('[PAPER.IO HACK] Insira a URL da imagem para o avatar:\n\nFormatos suportados: PNG, JPG, GIF\n\nExemplo: https://i.imgur.com/YXZiM0t.jpeg\n\nDeixe em branco para remover o avatar personalizado');
+                if (url !== null) {
+                    loadCustomAvatar(url);
+                }
+            } else {
+                console.log('[PAPER.IO HACK] F3 pressionado - Hacks não ativados');
+                // Mesmo com hacks desativados, permite configurar a URL para quando ativar
+                const url = prompt('[PAPER.IO HACK] URL do avatar (será aplicado ao ativar os hacks):\n\nhttps://i.imgur.com/YXZiM0t.jpeg');
+                if (url && url.trim() !== '') {
+                    customAvatarUrl = url.trim();
+                    showNotification('✅ URL salva! Ative os hacks (F1) para aplicar.', '#00ff00');
+                }
+            }
             e.preventDefault();
         }
     });
